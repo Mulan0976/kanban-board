@@ -29,6 +29,8 @@ interface EffectDef {
 
 // Per-effect default opacities
 const EFFECT_DEFAULT_OPACITY: Record<string, number> = {
+  none: 0,
+  subtle: 0.7,
   cells: 0.4,
   fog: 0.4,
   ripple: 0.3,
@@ -89,6 +91,15 @@ const EFFECTS: Record<string, EffectDef> = {
 };
 
 const EFFECT_KEYS = Object.keys(EFFECTS);
+const ALL_EFFECT_KEYS = ['none', 'subtle', ...EFFECT_KEYS];
+const ALL_EFFECT_LABELS: Record<string, string> = {
+  none: 'None',
+  subtle: 'Subtle',
+  cells: 'Cells',
+  fog: 'Fog',
+  ripple: 'Ripple',
+  topology: 'Topology',
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -235,6 +246,39 @@ const VantaCanvas = React.memo(function VantaCanvas({
   );
 });
 
+// Lightweight CSS-only animated background
+const SubtleBackground = React.memo(function SubtleBackground({ opacity }: { opacity: number }) {
+  return (
+    <div
+      style={{
+        position: 'fixed', top: 0, left: 0,
+        width: '100vw', height: '100vh', zIndex: 0,
+        opacity,
+        transition: 'opacity 0.4s ease',
+        background: 'radial-gradient(ellipse at 20% 50%, rgba(34,197,94,0.08) 0%, transparent 50%), radial-gradient(ellipse at 80% 20%, rgba(16,185,129,0.06) 0%, transparent 50%), radial-gradient(ellipse at 50% 80%, rgba(5,150,105,0.05) 0%, transparent 50%), #050505',
+        overflow: 'hidden',
+      }}
+    >
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: 'radial-gradient(ellipse at 30% 40%, rgba(34,197,94,0.07) 0%, transparent 60%)',
+        animation: 'subtleDrift 20s ease-in-out infinite alternate',
+      }} />
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: 'radial-gradient(ellipse at 70% 60%, rgba(16,185,129,0.05) 0%, transparent 60%)',
+        animation: 'subtleDrift 25s ease-in-out infinite alternate-reverse',
+      }} />
+      <style>{`
+        @keyframes subtleDrift {
+          0% { transform: translate(0, 0) scale(1); }
+          100% { transform: translate(30px, -20px) scale(1.05); }
+        }
+      `}</style>
+    </div>
+  );
+});
+
 export default function StarBackground() {
   const [state, setState] = useState<SavedState>(loadState);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -243,7 +287,8 @@ export default function StarBackground() {
   stateRef.current = state;
 
   const effectKey = state.effect;
-  const effectDef = EFFECTS[effectKey] || EFFECTS.cells;
+  const isVanta = effectKey !== 'none' && effectKey !== 'subtle';
+  const effectDef = isVanta ? (EFFECTS[effectKey] || EFFECTS.cells) : null;
 
   useEffect(() => { saveState(state); }, [state]);
 
@@ -255,7 +300,7 @@ export default function StarBackground() {
       return { ...prev, paramsByEffect: { ...pbe, [prev.effect]: effectParams } };
     });
     // Live-update via window bridge
-    const p = effectDef.params.find((x) => x.key === key);
+    const p = effectDef?.params.find((x) => x.key === key);
     if (p && (window as any).__vantaSetOptions) {
       const opt: Record<string, any> = {};
       opt[key] = p.type === 'color' ? hexToInt(value as string) : value;
@@ -276,9 +321,11 @@ export default function StarBackground() {
   const copySettings = () => {
     const effectParams = (state.paramsByEffect || {})[effectKey] || {};
     const allParams: Record<string, any> = {};
-    for (const p of effectDef.params) {
-      const val = effectParams[p.key] ?? p.defaultValue;
-      allParams[p.key] = p.type === 'color' ? hexToInt(val as string) : val;
+    if (effectDef) {
+      for (const p of effectDef.params) {
+        const val = effectParams[p.key] ?? p.defaultValue;
+        allParams[p.key] = p.type === 'color' ? hexToInt(val as string) : val;
+      }
     }
     const output = { effect: effectKey, opacity: state.opacity, ...allParams };
     navigator.clipboard.writeText(JSON.stringify(output, null, 2));
@@ -290,8 +337,9 @@ export default function StarBackground() {
 
   return (
     <>
-      {/* Vanta container - isolated component, won't re-render from UI state */}
-      <VantaCanvas effectKey={effectKey} opacity={state.opacity} stateRef={stateRef} />
+      {/* Background layer */}
+      {isVanta && <VantaCanvas effectKey={effectKey} opacity={state.opacity} stateRef={stateRef} />}
+      {effectKey === 'subtle' && <SubtleBackground opacity={state.opacity} />}
 
       {/* Glow orbs */}
       <div className="fixed pointer-events-none" style={{ zIndex: 1, top: '-8%', left: '-3%', width: '50vw', height: '50vh', background: 'radial-gradient(ellipse at center, rgba(34,197,94,0.06) 0%, rgba(34,197,94,0.02) 40%, transparent 70%)', filter: 'blur(60px)' }} />
@@ -342,22 +390,23 @@ export default function StarBackground() {
               onClick={() => setEffectDropdownOpen(!effectDropdownOpen)}
               style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, color: '#fff', fontSize: 13, cursor: 'pointer', textTransform: 'capitalize' }}
             >
-              {effectDef.name}
+              {ALL_EFFECT_LABELS[effectKey] || effectKey}
               <ChevronDown size={14} style={{ opacity: 0.5, transform: effectDropdownOpen ? 'rotate(180deg)' : undefined, transition: 'transform 0.2s' }} />
             </button>
             {effectDropdownOpen && (
               <>
                 <div style={{ position: 'fixed', inset: 0, zIndex: 5 }} onClick={() => setEffectDropdownOpen(false)} />
                 <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, maxHeight: 220, overflowY: 'auto', background: 'rgba(10,10,10,0.98)', backdropFilter: 'blur(30px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, zIndex: 10, padding: '3px 0' }}>
-                  {EFFECT_KEYS.map((key) => (
+                  {ALL_EFFECT_KEYS.map((key) => (
                     <button
                       key={key}
                       onClick={() => switchEffect(key)}
-                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 12, textTransform: 'capitalize', color: key === effectKey ? emerald : 'rgba(255,255,255,0.7)', background: key === effectKey ? 'rgba(16,185,129,0.1)' : 'transparent', border: 'none', cursor: 'pointer', transition: 'background 0.15s' }}
+                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 12, color: key === effectKey ? emerald : 'rgba(255,255,255,0.7)', background: key === effectKey ? 'rgba(16,185,129,0.1)' : 'transparent', border: 'none', cursor: 'pointer', transition: 'background 0.15s' }}
                       onMouseEnter={(e) => { if (key !== effectKey) (e.target as HTMLElement).style.background = 'rgba(255,255,255,0.06)'; }}
                       onMouseLeave={(e) => { (e.target as HTMLElement).style.background = key === effectKey ? 'rgba(16,185,129,0.1)' : 'transparent'; }}
                     >
-                      {EFFECTS[key].name}
+                      {ALL_EFFECT_LABELS[key]}
+                      {(key === 'none' || key === 'subtle') && <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginLeft: 6 }}>{key === 'none' ? 'no GPU' : 'low GPU'}</span>}
                     </button>
                   ))}
                 </div>
@@ -365,20 +414,22 @@ export default function StarBackground() {
             )}
           </div>
 
-          {/* Overall opacity */}
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)' }}>Opacity</span>
-              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', fontFamily: 'monospace' }}>{state.opacity.toFixed(2)}</span>
+          {/* Overall opacity (hidden for "none") */}
+          {effectKey !== 'none' && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)' }}>Opacity</span>
+                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', fontFamily: 'monospace' }}>{state.opacity.toFixed(2)}</span>
+              </div>
+              <input type="range" min={0} max={1} step={0.05} value={state.opacity} onChange={(e) => setState((p) => ({ ...p, opacity: parseFloat(e.target.value) }))} style={{ width: '100%', accentColor: emerald, height: 4 }} />
             </div>
-            <input type="range" min={0} max={1} step={0.05} value={state.opacity} onChange={(e) => setState((p) => ({ ...p, opacity: parseFloat(e.target.value) }))} style={{ width: '100%', accentColor: emerald, height: 4 }} />
-          </div>
+          )}
 
-          {/* Divider */}
-          <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '10px 0' }} />
-
-          {/* Per-effect params */}
-          {effectDef.params.map((p) => {
+          {/* Per-effect params (only for Vanta effects) */}
+          {effectDef && effectDef.params.length > 0 && (
+            <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '10px 0' }} />
+          )}
+          {effectDef?.params.map((p) => {
             const val = getDisplayValue(effectKey, p.key, (state.paramsByEffect || {})[effectKey] || {});
             if (p.type === 'color') {
               return (
