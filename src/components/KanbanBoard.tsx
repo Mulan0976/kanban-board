@@ -1012,7 +1012,7 @@ function KanbanBoard() {
 
   // Dragging columns
   const [draggingColumnId, setDraggingColumnId] = useState<string | null>(null);
-  const [dragStart, setDragStart] = useState<{ x: number; y: number; colX: number; colY: number } | null>(null);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number; colX: number; colY: number; scrollX: number; scrollY: number } | null>(null);
 
   // Panning
   const [isPanning, setIsPanning] = useState(false);
@@ -1041,6 +1041,56 @@ function KanbanBoard() {
   // Refs
   const canvasRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll when dragging columns near edges
+  const autoScrollRef = useRef<{ mouseX: number; mouseY: number; rafId: number | null }>({
+    mouseX: 0,
+    mouseY: 0,
+    rafId: null,
+  });
+
+  const startAutoScroll = useCallback(() => {
+    const EDGE_ZONE = 60;
+    const MAX_SPEED = 18;
+
+    const tick = () => {
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const { mouseX, mouseY } = autoScrollRef.current;
+
+      let dx = 0;
+      let dy = 0;
+
+      if (mouseX < rect.left + EDGE_ZONE) {
+        dx = -MAX_SPEED * Math.max(0, 1 - (mouseX - rect.left) / EDGE_ZONE);
+      } else if (mouseX > rect.right - EDGE_ZONE) {
+        dx = MAX_SPEED * Math.max(0, 1 - (rect.right - mouseX) / EDGE_ZONE);
+      }
+
+      if (mouseY < rect.top + EDGE_ZONE) {
+        dy = -MAX_SPEED * Math.max(0, 1 - (mouseY - rect.top) / EDGE_ZONE);
+      } else if (mouseY > rect.bottom - EDGE_ZONE) {
+        dy = MAX_SPEED * Math.max(0, 1 - (rect.bottom - mouseY) / EDGE_ZONE);
+      }
+
+      if (dx !== 0 || dy !== 0) {
+        container.scrollLeft += dx;
+        container.scrollTop += dy;
+      }
+
+      autoScrollRef.current.rafId = requestAnimationFrame(tick);
+    };
+
+    autoScrollRef.current.rafId = requestAnimationFrame(tick);
+  }, []);
+
+  const stopAutoScroll = useCallback(() => {
+    if (autoScrollRef.current.rafId !== null) {
+      cancelAnimationFrame(autoScrollRef.current.rafId);
+      autoScrollRef.current.rafId = null;
+    }
+  }, []);
 
   const columns = currentBoard?.columns ?? [];
   const permission = currentBoard?.permission ?? 'view';
@@ -1541,8 +1591,13 @@ function KanbanBoard() {
 
       // Column dragging
       if (draggingColumnId && dragStart) {
-        const dx = (e.clientX - dragStart.x) / zoom;
-        const dy = (e.clientY - dragStart.y) / zoom;
+        autoScrollRef.current.mouseX = e.clientX;
+        autoScrollRef.current.mouseY = e.clientY;
+        const container = containerRef.current;
+        const scrollDx = container ? (container.scrollLeft - dragStart.scrollX) / zoom : 0;
+        const scrollDy = container ? (container.scrollTop - dragStart.scrollY) / zoom : 0;
+        const dx = (e.clientX - dragStart.x) / zoom + scrollDx;
+        const dy = (e.clientY - dragStart.y) / zoom + scrollDy;
         updateColumnInStore(draggingColumnId, {
           x: Math.max(0, dragStart.colX + dx),
           y: Math.max(0, dragStart.colY + dy),
@@ -1582,6 +1637,7 @@ function KanbanBoard() {
 
       // End column dragging
       if (draggingColumnId && dragStart) {
+        stopAutoScroll();
         const col = columns.find((c) => c.id === draggingColumnId);
         if (col && canEdit) {
           try {
@@ -1662,6 +1718,7 @@ function KanbanBoard() {
       updateColumnInStore,
       selectColumnsInRect,
       pushHistory,
+      stopAutoScroll,
     ]
   );
 
@@ -1674,10 +1731,21 @@ function KanbanBoard() {
       const col = columns.find((c) => c.id === columnId);
       if (!col) return;
       e.preventDefault();
+      const container = containerRef.current;
       setDraggingColumnId(columnId);
-      setDragStart({ x: e.clientX, y: e.clientY, colX: col.x, colY: col.y });
+      setDragStart({
+        x: e.clientX,
+        y: e.clientY,
+        colX: col.x,
+        colY: col.y,
+        scrollX: container?.scrollLeft ?? 0,
+        scrollY: container?.scrollTop ?? 0,
+      });
+      autoScrollRef.current.mouseX = e.clientX;
+      autoScrollRef.current.mouseY = e.clientY;
+      startAutoScroll();
     },
-    [canEdit, columns]
+    [canEdit, columns, startAutoScroll]
   );
 
   // ============================================================
