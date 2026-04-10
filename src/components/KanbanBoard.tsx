@@ -1640,23 +1640,22 @@ function KanbanBoard() {
       if (draggingColumnId && dragStart) {
         stopAutoScroll();
         const col = columns.find((c) => c.id === draggingColumnId);
+        const prevDragStart = dragStart;
+        setDraggingColumnId(null);
+        setDragStart(null);
         if (col && canEdit) {
-          try {
-            await api.columns.update(draggingColumnId, { x: col.x, y: col.y });
+          api.columns.update(draggingColumnId, { x: col.x, y: col.y }).then(() => {
             pushHistory({
               type: 'updateColumn',
-              columnId: draggingColumnId,
-              before: { x: dragStart.colX, y: dragStart.colY },
+              columnId: col.id,
+              before: { x: prevDragStart.colX, y: prevDragStart.colY },
               after: { x: col.x, y: col.y },
               label: `Move column "${col.title}"`,
             });
-          } catch {
-            // Revert on failure
-            updateColumnInStore(draggingColumnId, { x: dragStart.colX, y: dragStart.colY });
-          }
+          }).catch(() => {
+            updateColumnInStore(col.id, { x: prevDragStart.colX, y: prevDragStart.colY });
+          });
         }
-        setDraggingColumnId(null);
-        setDragStart(null);
         return;
       }
 
