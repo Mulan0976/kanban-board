@@ -416,7 +416,7 @@ export function ConfirmDialog({
       ? 'bg-amber-500/20 text-amber-400 border-amber-500/30 hover:bg-amber-500/30'
       : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/30';
 
-  return (
+  return ReactDOM.createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center" onClick={onCancel}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
@@ -472,6 +472,7 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
