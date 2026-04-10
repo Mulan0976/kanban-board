@@ -40,6 +40,7 @@ export default function TaskModal({ task: initialTask, columnId, board, onClose,
   const [title, setTitle] = useState(initialTask.title);
   const [content, setContent] = useState(initialTask.content);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [showMoveToCompletePrompt, setShowMoveToCompletePrompt] = useState(false);
   const [newCheckpointTitle, setNewCheckpointTitle] = useState('');
   const [editingCheckpointId, setEditingCheckpointId] = useState<string | null>(null);
   const [editingCheckpointTitle, setEditingCheckpointTitle] = useState('');
@@ -226,12 +227,32 @@ export default function TaskModal({ task: initialTask, columnId, board, onClose,
         );
         updateTaskInStore(task.id, { checkpoints: newCheckpoints });
         setTask((prev) => ({ ...prev, checkpoints: newCheckpoints }));
+
+        // Check if all checkpoints are now completed -> prompt to move to done column
+        const allDone = newCheckpoints.length > 0 && newCheckpoints.every((c) => c.isCompleted);
+        const currentCol = board.columns.find((c) => c.id === columnId);
+        if (allDone && doneColumn && currentCol && !currentCol.isDoneColumn) {
+          setShowMoveToCompletePrompt(true);
+        }
       } catch (err) {
         console.error('Failed to toggle checkpoint:', err);
       }
     },
-    [readOnly, task, updateTaskInStore]
+    [readOnly, task, updateTaskInStore, board.columns, columnId, doneColumn]
   );
+
+  const handleMoveToComplete = useCallback(async () => {
+    if (!doneColumn) return;
+    setShowMoveToCompletePrompt(false);
+    const position = doneColumn.tasks.length;
+    moveTask(task.id, columnId, doneColumn.id, position, task);
+    try {
+      await api.tasks.move(task.id, doneColumn.id, position);
+    } catch {
+      moveTask(task.id, doneColumn.id, columnId, 0, task);
+    }
+    onClose();
+  }, [doneColumn, task, columnId, moveTask, onClose]);
 
   const handleDeleteCheckpoint = useCallback(
     async (cpId: string) => {
@@ -937,6 +958,32 @@ export default function TaskModal({ task: initialTask, columnId, board, onClose,
           )}
         </div>
       </div>
+
+      {/* Move to Completed Column Prompt */}
+      {showMoveToCompletePrompt && doneColumn && (
+        <div className="absolute inset-0 bg-black/60 rounded-2xl flex items-center justify-center z-50 animate-in">
+          <div className="mx-4 p-5 rounded-xl border border-emerald-500/20 bg-[#0c0c0c] shadow-2xl max-w-sm w-full space-y-4">
+            <div className="flex items-center gap-2">
+              <Check size={18} className="text-emerald-400" />
+              <h3 className="text-sm font-semibold text-gray-100" style={{ fontFamily: "'Syne', sans-serif" }}>
+                All checkpoints completed!
+              </h3>
+            </div>
+            <p className="text-xs text-gray-400">
+              Move this task to <span className="text-emerald-400 font-medium">"{doneColumn.title}"</span>?
+            </p>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleMoveToComplete} className="flex-1">
+                <ArrowRight size={12} />
+                Move to {doneColumn.title}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowMoveToCompletePrompt(false)} className="flex-1">
+                Stay Here
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }

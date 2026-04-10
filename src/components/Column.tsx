@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Plus,
   Trash2,
@@ -204,25 +204,45 @@ function Column({
   // DnD handlers
   // ============================================================
   const isDragOverRef = useRef(false);
+  const columnDropRef = useRef<HTMLDivElement>(null);
+
+  // Reset drag-over state when any drag operation ends globally.
+  // This prevents isDragOver from getting stuck when a task is removed
+  // mid-drag (e.g. dropped on the Completed sidebar).
+  useEffect(() => {
+    const resetDragOver = () => {
+      setIsDragOver(false);
+      isDragOverRef.current = false;
+    };
+    document.addEventListener('dragend', resetDragOver);
+    return () => document.removeEventListener('dragend', resetDragOver);
+  }, []);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(true);
-    isDragOverRef.current = true;
-    onDragOverColumn(column.id);
+    if (!isDragOverRef.current) {
+      setIsDragOver(true);
+      isDragOverRef.current = true;
+      onDragOverColumn(column.id);
+    }
     onTaskDragOver(e);
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
-    e.stopPropagation();
+    // Only leave if the cursor actually left the column bounds
+    const rect = columnDropRef.current?.getBoundingClientRect();
+    if (rect) {
+      const { clientX, clientY } = e;
+      if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+        return; // Still inside the column, ignore this leave
+      }
+    }
     setIsDragOver(false);
     isDragOverRef.current = false;
-    // Don't clear onDragOverColumn here - dragend needs to know the last hovered column
   };
 
   const handleDrop = (e: React.DragEvent) => {
-    e.stopPropagation();
+    e.preventDefault();
     setIsDragOver(false);
     isDragOverRef.current = false;
     onTaskDrop(column.id, e);
@@ -295,6 +315,7 @@ function Column({
             ? `0 0 25px ${hexToRgba(accentColor, 0.25)}, 0 25px 50px rgba(0,0,0,0.5)`
             : '0 25px 50px rgba(0, 0, 0, 0.25)',
         }}
+        ref={columnDropRef}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -462,7 +483,7 @@ function Column({
           className={`p-2 space-y-2 min-h-[40px] transition-colors duration-200 overflow-y-auto ${
             isDragOver ? 'bg-emerald-500/5' : ''
           }`}
-          style={column.height ? { maxHeight: column.height - 90 } : { maxHeight: 600 }}
+          style={{ ...(column.height ? { maxHeight: column.height - 90 } : { maxHeight: 600 }), ...(isDragOver ? { pointerEvents: 'none' as const } : {}) }}
         >
           {column.isDoneColumn ? (
             <>
@@ -520,7 +541,7 @@ function Column({
 
         {/* ======== Add Task ======== */}
         {canEdit && (
-          <div className="p-2 border-t border-white/[0.06]">
+          <div className="p-2 border-t border-white/[0.06]" style={isDragOver ? { pointerEvents: 'none' } : undefined}>
             {showAddTask ? (
               <div className="space-y-2">
                 <input

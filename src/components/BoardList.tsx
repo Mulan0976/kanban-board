@@ -364,8 +364,8 @@ export default function BoardList() {
         ) : (
           /* Board grid */
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* New Board card */}
-            {showNewBoard ? (
+            {/* New Board card (authenticated users only) */}
+            {!isAuthenticated ? null : showNewBoard ? (
               <div className="glass rounded-xl p-5 border border-emerald-500/20 bg-emerald-500/[0.03] animate-in">
                 <div className="space-y-3">
                   <h3
@@ -432,7 +432,7 @@ export default function BoardList() {
               </button>
             )}
 
-            {/* Board cards */}
+            {/* Board cards (note: extra closing paren from ternary above) */}
             {boards.map((board) => (
               <div
                 key={board.id}

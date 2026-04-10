@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { LogIn, UserPlus, Mail, Lock, User, AlertCircle, Ghost } from 'lucide-react';
 import { Modal, Input, Button } from './UI';
 import { api } from '../api';
@@ -18,6 +18,12 @@ export default function AuthModal({
   initialMode = 'login',
 }: AuthModalProps) {
   const [mode, setMode] = useState<'login' | 'register'>(initialMode);
+
+  // Sync mode when initialMode changes (e.g., opening modal from different buttons)
+  useEffect(() => {
+    setMode(initialMode);
+  }, [initialMode]);
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');

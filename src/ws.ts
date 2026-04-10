@@ -11,13 +11,19 @@ class WebSocketClient {
   private currentBoardId: string | null = null;
   private isIntentionalClose = false;
 
-  private getUrl(): string {
+  private getUrl(boardId: string): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.hostname;
-    return `${protocol}//${host}:3001/ws`;
+    const host = window.location.host;
+    return `${protocol}//${host}/ws/${boardId}`;
   }
 
   connect(): void {
+    // No-op without a board ID; connection happens via joinBoard
+    if (!this.currentBoardId) return;
+    this.connectToBoard(this.currentBoardId);
+  }
+
+  private connectToBoard(boardId: string): void {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
@@ -25,7 +31,7 @@ class WebSocketClient {
     this.isIntentionalClose = false;
 
     try {
-      this.ws = new WebSocket(this.getUrl());
+      this.ws = new WebSocket(this.getUrl(boardId));
     } catch {
       this.scheduleReconnect();
       return;
@@ -33,10 +39,6 @@ class WebSocketClient {
 
     this.ws.onopen = () => {
       this.reconnectAttempts = 0;
-      // Re-join board if we were in one before reconnecting
-      if (this.currentBoardId) {
-        this.send({ type: 'join', boardId: this.currentBoardId });
-      }
     };
 
     this.ws.onmessage = (event: MessageEvent) => {
@@ -84,19 +86,27 @@ class WebSocketClient {
   }
 
   joinBoard(boardId: string): void {
-    // Leave previous board if any
+    // If switching boards, close the old connection
     if (this.currentBoardId && this.currentBoardId !== boardId) {
-      this.send({ type: 'leave', boardId: this.currentBoardId });
+      this.isIntentionalClose = true;
+      if (this.ws) {
+        this.ws.close();
+        this.ws = null;
+      }
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      this.reconnectAttempts = 0;
     }
 
     this.currentBoardId = boardId;
-    this.send({ type: 'join', boardId });
+    this.connectToBoard(boardId);
   }
 
   leaveBoard(boardId: string): void {
-    this.send({ type: 'leave', boardId });
     if (this.currentBoardId === boardId) {
-      this.currentBoardId = null;
+      this.disconnect();
     }
   }
 
@@ -124,14 +134,15 @@ class WebSocketClient {
       clearTimeout(this.reconnectTimer);
     }
 
-    // Exponential backoff: 500ms, 1s, 2s, 4s, 8s, ... capped at 30s
     const baseDelay = 500;
     const delay = Math.min(baseDelay * Math.pow(2, this.reconnectAttempts), 30000);
     this.reconnectAttempts++;
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.connect();
+      if (this.currentBoardId) {
+        this.connectToBoard(this.currentBoardId);
+      }
     }, delay);
   }
 }

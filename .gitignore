@@ -7,3 +7,5 @@ uploads/
 .env.*.local
 .DS_Store
 *.log
+.wrangler/
+.dev.vars

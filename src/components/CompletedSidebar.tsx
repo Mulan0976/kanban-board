@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   X,
   Search,
@@ -8,13 +8,17 @@ import {
   Clock,
   Users,
   Inbox,
+  FileText,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
 import type { Board, Task, Column } from '../types';
 import { formatDuration, getTaskProgress } from '../types';
+import CompletedSummaryModal from './CompletedSummaryModal';
 
-type SortKey = 'completedAt' | 'createdAt' | 'title';
+type SortKey = 'completedAt' | 'createdAt' | 'title' | 'assignee';
 
 interface CompletedSidebarProps {
   board: Board;
@@ -37,6 +41,9 @@ function CompletedSidebar({
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('completedAt');
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 12;
 
   const canEdit = permission !== 'view';
 
@@ -61,13 +68,14 @@ function CompletedSidebar({
   const filteredTasks = useMemo(() => {
     let result = allCompletedTasks;
 
-    // Search filter
+    // Search filter (title, content, and assignee name)
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       result = result.filter(
         ({ task }) =>
           task.title.toLowerCase().includes(q) ||
-          task.content.toLowerCase().includes(q)
+          task.content.toLowerCase().includes(q) ||
+          task.assignees.some((a) => a.name.toLowerCase().includes(q))
       );
     }
 
@@ -86,6 +94,11 @@ function CompletedSidebar({
           );
         case 'title':
           return a.task.title.localeCompare(b.task.title);
+        case 'assignee': {
+          const aName = a.task.assignees[0]?.name || '';
+          const bName = b.task.assignees[0]?.name || '';
+          return aName.localeCompare(bName);
+        }
         default:
           return 0;
       }
@@ -93,6 +106,14 @@ function CompletedSidebar({
 
     return result;
   }, [allCompletedTasks, searchQuery, sortKey]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(0);
+  }, [searchQuery, sortKey]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredTasks.length / PAGE_SIZE));
+  const pagedTasks = filteredTasks.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   // ============================================================
   // Restore task (move to first non-done column)
@@ -195,6 +216,7 @@ function CompletedSidebar({
     completedAt: 'Completed Date',
     createdAt: 'Created Date',
     title: 'Title',
+    assignee: 'Assignee',
   };
 
   return (
@@ -210,9 +232,9 @@ function CompletedSidebar({
       <div
         className={`w-[350px] h-full flex flex-col border-l transition-colors duration-200 ${isDragOver ? 'border-emerald-500/40' : ''}`}
         style={{
-          background: isDragOver ? 'rgba(34, 197, 94, 0.05)' : 'rgba(10, 10, 10, 0.85)',
-          backdropFilter: 'blur(30px)',
-          WebkitBackdropFilter: 'blur(30px)',
+          background: isDragOver ? 'rgba(34, 197, 94, 0.05)' : 'rgba(15, 15, 15, 0.6)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
           borderColor: isDragOver ? 'rgba(34, 197, 94, 0.3)' : 'rgba(255, 255, 255, 0.08)',
         }}
       >
@@ -228,12 +250,23 @@ function CompletedSidebar({
                 {allCompletedTasks.length}
               </span>
             </div>
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-lg hover:bg-white/10 text-[#6b7280] hover:text-[#f3f4f6] transition-colors"
-            >
-              <X size={16} />
-            </button>
+            <div className="flex items-center gap-1">
+              {allCompletedTasks.length > 0 && (
+                <button
+                  onClick={() => setShowSummary(true)}
+                  className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-emerald-500/10 text-[#6b7280] hover:text-emerald-400 transition-colors text-[11px]"
+                  title="See Summary"
+                >
+                  <FileText size={14} />
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded-lg hover:bg-white/10 text-[#6b7280] hover:text-[#f3f4f6] transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
           </div>
 
           {/* Search bar */}
@@ -245,7 +278,7 @@ function CompletedSidebar({
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search completed tasks..."
+              placeholder="Search by title, content, or name..."
               className="w-full bg-white/5 border border-white/10 rounded-lg pl-8 pr-3 py-2 text-sm text-[#f3f4f6] focus:outline-none focus:border-emerald-500/50 placeholder:text-[#6b7280]/50"
             />
           </div>
@@ -266,7 +299,7 @@ function CompletedSidebar({
                   className="fixed inset-0 z-40"
                   onClick={() => setShowSortMenu(false)}
                 />
-                <div className="absolute left-0 top-full mt-1 w-40 glass rounded-lg border border-white/10 py-1 z-50 animate-in">
+                <div className="absolute left-0 top-full mt-1 w-40 rounded-lg border border-white/10 py-1 z-50 animate-in" style={{ background: 'rgb(20, 20, 20)' }}>
                   {(Object.keys(sortLabels) as SortKey[]).map((key) => (
                     <button
                       key={key}
@@ -291,7 +324,7 @@ function CompletedSidebar({
 
         {/* ======== Task List ======== */}
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
-          {filteredTasks.map(({ task, column }) => {
+          {pagedTasks.map(({ task, column }) => {
             const progress = getTaskProgress(task);
             const hasCheckpoints = task.checkpoints.length > 0;
             const completedCheckpoints = task.checkpoints.filter(
@@ -366,7 +399,7 @@ function CompletedSidebar({
 
                   {/* From column */}
                   <span className="text-[10px] text-[#6b7280]/60 ml-auto">
-                    {column.title}
+                    From column: {column.title}
                   </span>
                 </div>
 
@@ -403,7 +436,7 @@ function CompletedSidebar({
           })}
 
           {/* Empty state */}
-          {filteredTasks.length === 0 && (
+          {pagedTasks.length === 0 && (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Inbox size={32} className="text-[#6b7280]/30 mb-3" />
               {allCompletedTasks.length === 0 ? (
@@ -424,6 +457,29 @@ function CompletedSidebar({
             </div>
           )}
         </div>
+
+        {/* ======== Pagination ======== */}
+        {totalPages > 1 && (
+          <div className="shrink-0 px-4 py-2 border-t border-white/[0.06] flex items-center justify-between">
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className="p-1 rounded-lg hover:bg-white/10 text-[#6b7280] hover:text-[#f3f4f6] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <span className="text-[11px] text-[#6b7280] font-mono tabular-nums">
+              {page + 1} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1}
+              className="p-1 rounded-lg hover:bg-white/10 text-[#6b7280] hover:text-[#f3f4f6] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        )}
 
         {/* ======== Footer ======== */}
         {allCompletedTasks.length > 0 && (
@@ -448,6 +504,10 @@ function CompletedSidebar({
           }
         }
       `}</style>
+
+      {showSummary && (
+        <CompletedSummaryModal onClose={() => setShowSummary(false)} />
+      )}
     </div>
   );
 }

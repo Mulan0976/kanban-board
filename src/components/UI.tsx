@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import { X, Check, ChevronDown, AlertTriangle } from 'lucide-react';
 import { COLORS } from '../types';
 
@@ -224,6 +225,8 @@ interface DropdownProps {
 export function Dropdown({ trigger, items, onSelect, align = 'left' }: DropdownProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
 
   useEffect(() => {
     if (!open) return;
@@ -236,17 +239,33 @@ export function Dropdown({ trigger, items, onSelect, align = 'left' }: DropdownP
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [open]);
 
+  const handleOpen = () => {
+    if (!open && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setMenuPos({
+        top: rect.bottom + 4,
+        left: align === 'right' ? rect.right : rect.left,
+      });
+    }
+    setOpen(!open);
+  };
+
   return (
     <div className="relative inline-block" ref={containerRef}>
-      <div onClick={() => setOpen(!open)} className="cursor-pointer">
+      <div onClick={handleOpen} className="cursor-pointer" ref={triggerRef}>
         {trigger}
       </div>
-      {open && (
+      {open && ReactDOM.createPortal(
         <div
-          className={`absolute z-50 mt-1 min-w-[160px] glass rounded-lg border border-[rgba(255,255,255,0.08)] shadow-xl py-1 ${
-            align === 'right' ? 'right-0' : 'left-0'
-          }`}
-          style={{ animation: 'fadeIn 0.15s ease-out forwards' }}
+          className="fixed z-[200] min-w-[160px] rounded-lg border border-[rgba(255,255,255,0.12)] shadow-2xl py-1"
+          style={{
+            top: menuPos.top,
+            left: align === 'right' ? undefined : menuPos.left,
+            right: align === 'right' ? window.innerWidth - menuPos.left : undefined,
+            background: 'rgb(20, 20, 20)',
+            animation: 'fadeIn 0.15s ease-out forwards',
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
         >
           {items.map((item) => (
             <button
@@ -265,7 +284,8 @@ export function Dropdown({ trigger, items, onSelect, align = 'left' }: DropdownP
               {item.label}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

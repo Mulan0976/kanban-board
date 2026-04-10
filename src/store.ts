@@ -79,6 +79,7 @@ export const useStore = create<BoardState>((set, get) => ({
   addColumn: (column) =>
     set((state) => {
       if (!state.currentBoard) return state;
+      if (state.currentBoard.columns.some((c) => c.id === column.id)) return state;
       return {
         currentBoard: {
           ...state.currentBoard,
@@ -120,7 +121,7 @@ export const useStore = create<BoardState>((set, get) => ({
           ...state.currentBoard,
           columns: state.currentBoard.columns.map((col) =>
             col.id === columnId
-              ? { ...col, tasks: [...col.tasks, task] }
+              ? { ...col, tasks: col.tasks.some((t) => t.id === task.id) ? col.tasks : [...col.tasks, task] }
               : col
           ),
         },
@@ -181,8 +182,8 @@ export const useStore = create<BoardState>((set, get) => ({
 
       const finalColumns = columns.map((col) => {
         if (col.id === toColumnId) {
-          const newTasks = [...col.tasks];
-          // Insert at the correct position
+          // Filter out any existing instance of the task first (idempotent)
+          const newTasks = col.tasks.filter((t) => t.id !== taskId);
           const insertIdx = Math.min(position, newTasks.length);
           newTasks.splice(insertIdx, 0, updatedTask);
           // Re-index positions

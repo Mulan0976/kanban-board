@@ -116,13 +116,13 @@ function loadState(): SavedState {
     if (raw) {
       const parsed = JSON.parse(raw);
       return {
-        effect: parsed.effect || 'cells',
+        effect: parsed.effect || 'ripple',
         paramsByEffect: parsed.paramsByEffect || {},
         opacity: parsed.opacity ?? 0.75,
       };
     }
   } catch {}
-  return { effect: 'cells', paramsByEffect: {}, opacity: 0.4 };
+  return { effect: 'ripple', paramsByEffect: {}, opacity: 0.3 };
 }
 
 function saveState(s: SavedState) {

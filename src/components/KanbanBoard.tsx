@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactDOM from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Plus,
@@ -55,6 +56,7 @@ function ShareModal({ board, onClose }: ShareModalProps) {
   const [copied, setCopied] = useState(false);
   const [showPermDropdown, setShowPermDropdown] = useState(false);
   const [openMemberDropdown, setOpenMemberDropdown] = useState<string | null>(null);
+  const [memberDropdownPos, setMemberDropdownPos] = useState<{ top: number; right: number }>({ top: 0, right: 0 });
 
   useEffect(() => {
     api.boards.members(board.id).then(setMembers).catch(() => {});
@@ -139,7 +141,7 @@ function ShareModal({ board, onClose }: ShareModalProps) {
               {showPermDropdown && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setShowPermDropdown(false)} />
-                  <div className="absolute top-full left-0 right-0 mt-1 glass rounded-lg border border-white/10 py-1 z-20 animate-in" style={{ boxShadow: '0 15px 30px rgba(0,0,0,0.5)' }}>
+                  <div className="absolute top-full left-0 right-0 mt-1 rounded-lg border border-white/10 py-1 z-20 animate-in" style={{ background: 'rgb(20, 20, 20)', boxShadow: '0 15px 30px rgba(0,0,0,0.5)' }}>
                     <button
                       onClick={() => { setPermission('view'); setShowPermDropdown(false); }}
                       className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors ${permission === 'view' ? 'text-emerald-400 bg-emerald-500/10' : 'text-[#f3f4f6] hover:bg-white/10'}`}
@@ -209,20 +211,29 @@ function ShareModal({ board, onClose }: ShareModalProps) {
                   <div className="flex items-center gap-2">
                     <div className="relative">
                       <button
-                        onClick={() => setOpenMemberDropdown(openMemberDropdown === member.id ? null : member.id)}
+                        onClick={(e) => {
+                          if (openMemberDropdown === member.id) {
+                            setOpenMemberDropdown(null);
+                          } else {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setMemberDropdownPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                            setOpenMemberDropdown(member.id);
+                          }
+                        }}
                         className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-xs text-[#f3f4f6] hover:bg-white/[0.08] transition-colors"
                       >
                         {member.permission === 'view' ? 'View' : 'Edit'}
                         <ChevronDown size={10} className="text-[#6b7280]" />
                       </button>
-                      {openMemberDropdown === member.id && (
+                      {openMemberDropdown === member.id && ReactDOM.createPortal(
                         <>
-                          <div className="fixed inset-0 z-10" onClick={() => setOpenMemberDropdown(null)} />
-                          <div className="absolute right-0 top-full mt-1 w-28 glass rounded-lg border border-white/10 py-1 z-20 animate-in" style={{ boxShadow: '0 15px 30px rgba(0,0,0,0.5)' }}>
+                          <div className="fixed inset-0 z-[200]" onClick={() => setOpenMemberDropdown(null)} />
+                          <div className="fixed w-28 rounded-lg border border-white/10 py-1 z-[201] animate-in" style={{ top: memberDropdownPos.top, right: memberDropdownPos.right, background: 'rgb(20, 20, 20)', boxShadow: '0 15px 30px rgba(0,0,0,0.5)' }}>
                             <button onClick={() => { updateMemberPerm(member.id, 'view'); setOpenMemberDropdown(null); }} className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${member.permission === 'view' ? 'text-emerald-400 bg-emerald-500/10' : 'text-[#f3f4f6] hover:bg-white/10'}`}>View</button>
                             <button onClick={() => { updateMemberPerm(member.id, 'edit'); setOpenMemberDropdown(null); }} className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${member.permission === 'edit' ? 'text-emerald-400 bg-emerald-500/10' : 'text-[#f3f4f6] hover:bg-white/10'}`}>Edit</button>
                           </div>
-                        </>
+                        </>,
+                        document.body
                       )}
                     </div>
                     <button
@@ -943,6 +954,7 @@ function KanbanBoard() {
   const navigate = useNavigate();
 
   // Store
+  const user = useStore((s) => s.user);
   const currentBoard = useStore((s) => s.currentBoard);
   const setCurrentBoard = useStore((s) => s.setCurrentBoard);
   const zoom = useStore((s) => s.zoom);
@@ -1068,8 +1080,15 @@ function KanbanBoard() {
   }, [boardId, navigate, setCurrentBoard]);
 
   // ============================================================
-  // WebSocket
+  // WebSocket – skip echoed messages from our own mutations
   // ============================================================
+  const recentMutations = useRef(new Set<string>());
+
+  const markMutation = useCallback((key: string) => {
+    recentMutations.current.add(key);
+    setTimeout(() => recentMutations.current.delete(key), 3000);
+  }, []);
+
   useEffect(() => {
     if (!boardId) return;
 
@@ -1077,6 +1096,20 @@ function KanbanBoard() {
     wsClient.joinBoard(boardId);
 
     const handler = (msg: WSMessage) => {
+      // Build a key to detect echoed messages from our own actions
+      let echoKey = '';
+      switch (msg.type) {
+        case 'task:created': echoKey = `task:created:${msg.task.id}`; break;
+        case 'task:moved': echoKey = `task:moved:${msg.taskId}`; break;
+        case 'task:deleted': echoKey = `task:deleted:${msg.taskId}`; break;
+        case 'column:created': echoKey = `column:created:${msg.column.id}`; break;
+        case 'column:deleted': echoKey = `column:deleted:${msg.columnId}`; break;
+      }
+      if (echoKey && recentMutations.current.has(echoKey)) {
+        recentMutations.current.delete(echoKey);
+        return; // Skip this echoed message
+      }
+
       switch (msg.type) {
         case 'column:created':
           addColumnToStore(msg.column);
@@ -1327,6 +1360,7 @@ function KanbanBoard() {
         if (task) {
           try {
             await api.tasks.delete(taskId);
+            markMutation(`task:deleted:${taskId}`);
             removeTaskFromStore(taskId, col.id);
             pushHistory({ type: 'deleteTask', task, columnId: col.id, label: `Delete task "${task.title}"` });
           } catch {
@@ -1342,6 +1376,7 @@ function KanbanBoard() {
       if (col) {
         try {
           await api.columns.delete(colId);
+          markMutation(`column:deleted:${colId}`);
           removeColumnFromStore(colId);
           pushHistory({ type: 'deleteColumn', column: col, label: `Delete column "${col.title}"` });
         } catch {
@@ -1666,6 +1701,7 @@ function KanbanBoard() {
     const targetCol = cols.find((c) => c.id === targetColumnId);
     const position = targetCol ? targetCol.tasks.length : 0;
 
+    markMutation(`task:moved:${taskId}`);
     moveTaskInStore(taskId, sourceColumnId, targetColumnId, position);
 
     try {
@@ -1682,7 +1718,7 @@ function KanbanBoard() {
     } catch {
       moveTaskInStore(taskId, targetColumnId, sourceColumnId, 0);
     }
-  }, [moveTaskInStore, pushHistory]);
+  }, [moveTaskInStore, pushHistory, markMutation]);
 
   const handleCompleteTask = useCallback(async (taskId: string, _sourceColumnId: string) => {
     // Check if this task has incomplete dependencies
@@ -1913,6 +1949,7 @@ function KanbanBoard() {
         x: newX,
         y: newY,
       });
+      markMutation(`column:created:${created.id}`);
       addColumnToStore(created);
       pushHistory({ type: 'createColumn', columnId: created.id, label: `Create column "${created.title}"` });
       setNewColumnTitle('');
@@ -2115,25 +2152,31 @@ function KanbanBoard() {
 
         {/* Active Users */}
         <div className="flex items-center gap-1 ml-2">
-          {activeUsers.map(u => (
-            <div key={u.id} className="relative group" title={`${u.name} - ${u.action}`}>
-              <div
-                className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white border-2 border-[#050505] transition-transform hover:scale-110"
-                style={{ backgroundColor: u.color }}
-              >
-                {u.name.charAt(0).toUpperCase()}
-              </div>
-              {u.action === 'editing' && (
-                <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 rounded-full border border-[#050505]" />
-              )}
-              {/* Tooltip on hover */}
-              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
-                <div className="glass rounded-lg px-2 py-1 text-[10px] text-[#f3f4f6] whitespace-nowrap border border-white/10">
-                  {u.name}{u.action === 'editing' ? ' - editing' : ''}
+          {activeUsers.map(u => {
+            const isYou = u.id === user?.id;
+            return (
+              <div key={u.id} className="relative group flex flex-col items-center" title={`${u.name}${isYou ? ' (You)' : ''} - ${u.action}`}>
+                <div
+                  className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white border-2 border-[#050505] transition-transform hover:scale-110"
+                  style={{ backgroundColor: u.color }}
+                >
+                  {u.name.charAt(0).toUpperCase()}
+                </div>
+                {u.action === 'editing' && (
+                  <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 rounded-full border border-[#050505]" />
+                )}
+                {isYou && (
+                  <span className="text-[8px] text-[#6b7280] mt-0.5 leading-none">(You)</span>
+                )}
+                {/* Tooltip on hover */}
+                <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                  <div className="glass rounded-lg px-2 py-1 text-[10px] text-[#f3f4f6] whitespace-nowrap border border-white/10">
+                    {u.name}{isYou ? ' (You)' : ''}{u.action === 'editing' ? ' - editing' : ''}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="flex-1" />
@@ -2450,7 +2493,7 @@ function KanbanBoard() {
         )}
 
         {/* ======== Bottom Zoom Controls ======== */}
-        <div className="absolute bottom-4 right-4 flex items-center gap-2 z-20">
+        <div className={`absolute bottom-4 flex items-center gap-2 z-20 transition-all duration-300 ${showCompleted ? 'right-[370px]' : 'right-4'}`}>
           <button
             onClick={() => setZoom(Math.max(0.3, zoom - 0.1))}
             className="p-2 glass rounded-lg hover:bg-white/10 text-[#6b7280] hover:text-[#f3f4f6] transition-colors"
