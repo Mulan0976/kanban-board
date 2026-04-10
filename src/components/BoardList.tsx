@@ -12,7 +12,7 @@ import {
   Link2,
   User,
   ArrowRight,
-  Zap,
+  LayoutGrid,
   AlertCircle,
 } from 'lucide-react';
 import { Button, Badge, Input } from './UI';
@@ -202,7 +202,7 @@ export default function BoardList() {
           {/* Logo / Title */}
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg bg-emerald-600/20 border border-emerald-500/20 flex items-center justify-center shadow-[0_0_20px_rgba(34,197,94,0.15)]">
-              <Zap size={18} className="text-emerald-400" />
+              <LayoutGrid size={18} className="text-emerald-400" />
             </div>
             <h1
               className="text-xl font-bold text-gray-100 tracking-tight"
@@ -211,7 +211,7 @@ export default function BoardList() {
                 textShadow: '0 0 30px rgba(34,197,94,0.3)',
               }}
             >
-              NEXUS BOARD
+              BetterBoard
             </h1>
           </div>
 
