@@ -1058,14 +1058,15 @@ function KanbanBoard() {
       if (!container) return;
       const rect = container.getBoundingClientRect();
       const { mouseX, mouseY } = autoScrollRef.current;
+      const effectiveRight = rect.right - (showCompletedRef.current ? 350 : 0);
 
       let dx = 0;
       let dy = 0;
 
       if (mouseX < rect.left + EDGE_ZONE) {
         dx = -MAX_SPEED * Math.max(0, 1 - (mouseX - rect.left) / EDGE_ZONE);
-      } else if (mouseX > rect.right - EDGE_ZONE) {
-        dx = MAX_SPEED * Math.max(0, 1 - (rect.right - mouseX) / EDGE_ZONE);
+      } else if (mouseX > effectiveRight - EDGE_ZONE) {
+        dx = MAX_SPEED * Math.max(0, 1 - (effectiveRight - mouseX) / EDGE_ZONE);
       }
 
       if (mouseY < rect.top + EDGE_ZONE) {
