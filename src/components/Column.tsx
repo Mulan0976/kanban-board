@@ -25,7 +25,7 @@ interface ColumnProps {
   onTaskDragStart: (taskId: string, columnId: string, e: React.DragEvent) => void;
   onTaskDragOver: (e: React.DragEvent) => void;
   onTaskDrop: (columnId: string, e: React.DragEvent) => void;
-  onDragOverColumn: (columnId: string | null) => void;
+  onDragOverColumn: (columnId: string | null, position?: number | null) => void;
   onEditTask: (task: Task) => void;
   onLinkStart: (taskId: string) => void;
   onLinkEnd: (taskId: string) => void;
@@ -65,6 +65,7 @@ function Column({
   const [showMenu, setShowMenu] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [dropIndicatorIdx, setDropIndicatorIdx] = useState<number | null>(null);
   const [showAddTask, setShowAddTask] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -205,6 +206,7 @@ function Column({
   // ============================================================
   const isDragOverRef = useRef(false);
   const columnDropRef = useRef<HTMLDivElement>(null);
+  const taskContainerRef = useRef<HTMLDivElement>(null);
 
   // Reset drag-over state when any drag operation ends globally.
   // This prevents isDragOver from getting stuck when a task is removed
@@ -213,6 +215,7 @@ function Column({
     const resetDragOver = () => {
       setIsDragOver(false);
       isDragOverRef.current = false;
+      setDropIndicatorIdx(null);
     };
     document.addEventListener('dragend', resetDragOver);
     return () => document.removeEventListener('dragend', resetDragOver);
@@ -220,12 +223,28 @@ function Column({
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
+    onTaskDragOver(e);
+
+    // Compute drop position indicator
+    const container = taskContainerRef.current;
+    let idx = sortedTasks.length;
+    if (container) {
+      const taskEls = container.querySelectorAll('[data-task-id]');
+      for (let i = 0; i < taskEls.length; i++) {
+        const rect = taskEls[i].getBoundingClientRect();
+        if (e.clientY < rect.top + rect.height / 2) {
+          idx = i;
+          break;
+        }
+      }
+    }
+    setDropIndicatorIdx(idx);
+
     if (!isDragOverRef.current) {
       setIsDragOver(true);
       isDragOverRef.current = true;
-      onDragOverColumn(column.id);
     }
-    onTaskDragOver(e);
+    onDragOverColumn(column.id, idx);
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
@@ -239,12 +258,15 @@ function Column({
     }
     setIsDragOver(false);
     isDragOverRef.current = false;
+    setDropIndicatorIdx(null);
+    onDragOverColumn(null);
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
     isDragOverRef.current = false;
+    setDropIndicatorIdx(null);
     onTaskDrop(column.id, e);
   };
 
@@ -284,6 +306,7 @@ function Column({
 
   return (
     <div
+      data-column-id={column.id}
       className={`absolute transition-shadow duration-200`}
       style={{
         left: column.x,
@@ -480,10 +503,11 @@ function Column({
 
         {/* ======== Tasks ======== */}
         <div
+          ref={taskContainerRef}
           className={`p-2 space-y-2 min-h-[40px] transition-colors duration-200 overflow-y-auto ${
             isDragOver ? 'bg-emerald-500/5' : ''
           }`}
-          style={{ ...(column.height ? { maxHeight: column.height - 90 } : { maxHeight: 600 }), ...(isDragOver ? { pointerEvents: 'none' as const } : {}) }}
+          style={{ ...(column.height ? { maxHeight: column.height - 90 } : { maxHeight: 600 }) }}
         >
           {column.isDoneColumn ? (
             <>
@@ -512,22 +536,35 @@ function Column({
             </>
           ) : (
             <>
-              {sortedTasks.map((task) => (
-                <TaskCard
-                  key={task.id}
-                  task={task}
-                  columnId={column.id}
-                  isSelected={selectedTaskIds.has(task.id)}
-                  onEdit={onEditTask}
-                  onDragStart={onTaskDragStart}
-                  onLinkStart={onLinkStart}
-                  onLinkEnd={onLinkEnd}
-                  linkingFromTaskId={linkingFromTaskId}
-                  permission={permission}
-                  onSelect={handleSelectTask}
-                  onComplete={!column.isDoneColumn ? onCompleteTask : undefined}
-                />
+              {sortedTasks.map((task, idx) => (
+                <React.Fragment key={task.id}>
+                  {isDragOver && dropIndicatorIdx === idx && (
+                    <div
+                      className="h-0.5 rounded-full mx-1 transition-opacity"
+                      style={{ backgroundColor: accentColor, boxShadow: `0 0 6px ${accentColor}` }}
+                    />
+                  )}
+                  <TaskCard
+                    task={task}
+                    columnId={column.id}
+                    isSelected={selectedTaskIds.has(task.id)}
+                    onEdit={onEditTask}
+                    onDragStart={onTaskDragStart}
+                    onLinkStart={onLinkStart}
+                    onLinkEnd={onLinkEnd}
+                    linkingFromTaskId={linkingFromTaskId}
+                    permission={permission}
+                    onSelect={handleSelectTask}
+                    onComplete={!column.isDoneColumn ? onCompleteTask : undefined}
+                  />
+                </React.Fragment>
               ))}
+              {isDragOver && dropIndicatorIdx === sortedTasks.length && (
+                <div
+                  className="h-0.5 rounded-full mx-1 transition-opacity"
+                  style={{ backgroundColor: accentColor, boxShadow: `0 0 6px ${accentColor}` }}
+                />
+              )}
 
               {/* Drop zone indicator when empty */}
               {isDragOver && sortedTasks.length === 0 && (
@@ -541,7 +578,7 @@ function Column({
 
         {/* ======== Add Task ======== */}
         {canEdit && (
-          <div className="p-2 border-t border-white/[0.06]" style={isDragOver ? { pointerEvents: 'none' } : undefined}>
+          <div className="p-2 border-t border-white/[0.06]">
             {showAddTask ? (
               <div className="space-y-2">
                 <input

@@ -217,6 +217,7 @@ function TaskCard({
           ? '1px solid rgba(59, 130, 246, 0.3)'
           : '1px solid rgba(255, 255, 255, 0.06)',
       }}
+      data-task-id={task.id}
       draggable={canEdit}
       onDragStart={handleDragStart}
       onClick={handleClick}

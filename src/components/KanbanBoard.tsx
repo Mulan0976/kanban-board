@@ -1758,22 +1758,34 @@ function KanbanBoard() {
   const dragTaskInfoRef = useRef(dragTaskInfo);
   dragTaskInfoRef.current = dragTaskInfo;
 
-  // Track which column is being dragged over (reported by Column components)
+  // Track which column is being dragged over and drop position (reported by Column components)
   const dragOverColumnRef = useRef<string | null>(null);
-  const handleDragOverColumn = useCallback((columnId: string | null) => {
+  const dropPositionRef = useRef<number | null>(null);
+  const handleDragOverColumn = useCallback((columnId: string | null, position?: number | null) => {
     dragOverColumnRef.current = columnId;
+    dropPositionRef.current = position ?? null;
   }, []);
 
-  const doMoveTask = useCallback(async (taskId: string, sourceColumnId: string, targetColumnId: string) => {
+  const doMoveTask = useCallback(async (taskId: string, sourceColumnId: string, targetColumnId: string, targetPosition?: number) => {
     const cols = columnsRef.current;
     const targetCol = cols.find((c) => c.id === targetColumnId);
-    const position = targetCol ? targetCol.tasks.length : 0;
+    const position = targetPosition ?? (targetCol ? targetCol.tasks.length : 0);
+
+    console.log('[doMoveTask]', { taskId: taskId.slice(0, 8), from: sourceColumnId.slice(0, 8), to: targetColumnId.slice(0, 8), position });
+
+    // Debug: log before and after
+    const beforeCol = useStore.getState().currentBoard?.columns.find((c: any) => c.id === targetColumnId);
+    console.log('[doMoveTask] BEFORE:', beforeCol?.tasks.filter((t: any) => !t.completedAt).sort((a: any, b: any) => a.position - b.position).map((t: any) => `${t.title}(${t.position})`));
 
     markMutation(`task:moved:${taskId}`);
     moveTaskInStore(taskId, sourceColumnId, targetColumnId, position);
 
+    const afterCol = useStore.getState().currentBoard?.columns.find((c: any) => c.id === targetColumnId);
+    console.log('[doMoveTask] AFTER:', afterCol?.tasks.filter((t: any) => !t.completedAt).sort((a: any, b: any) => a.position - b.position).map((t: any) => `${t.title}(${t.position})`));
+
     try {
       await api.tasks.move(taskId, targetColumnId, position);
+      console.log('[doMoveTask] API success');
       pushHistory({
         type: 'moveTask',
         taskId,
@@ -1783,7 +1795,8 @@ function KanbanBoard() {
         toPosition: position,
         label: 'Move task',
       });
-    } catch {
+    } catch (err) {
+      console.error('[doMoveTask] API failed, reverting:', err);
       moveTaskInStore(taskId, targetColumnId, sourceColumnId, 0);
     }
   }, [moveTaskInStore, pushHistory, markMutation]);
@@ -1873,8 +1886,50 @@ function KanbanBoard() {
           if (dist < bestDist) { bestDist = dist; targetColId = col.id; }
         }
 
-        if (targetColId && targetColId !== columnId && bestDist < 400) {
-          doMoveTask(taskId, columnId, targetColId);
+        if (targetColId && bestDist < 400) {
+          // Use the drop position reported by the Column's dragover handler
+          const reportedCol = dragOverColumnRef.current;
+          const reportedPos = dropPositionRef.current;
+
+          // Prefer the Column-reported position if it matches the target column
+          const targetCol = columnsRef.current.find((c) => c.id === targetColId);
+          let targetPosition: number;
+          if (reportedCol === targetColId && reportedPos !== null) {
+            targetPosition = reportedPos;
+          } else {
+            targetPosition = targetCol ? targetCol.tasks.filter((t) => !t.completedAt).length : 0;
+          }
+
+          // For same-column reorder, adjust position to "after-removal" frame
+          if (targetColId === columnId) {
+            const sourceCol = columnsRef.current.find((c) => c.id === columnId);
+            const sortedVisible = sourceCol?.tasks
+              .filter((t) => !t.completedAt)
+              .sort((a, b) => a.position - b.position) ?? [];
+            const currentIdx = sortedVisible.findIndex((t) => t.id === taskId);
+
+            // Check if the DOM still includes the dragged element
+            const colEl = containerRef.current?.querySelector(`[data-column-id="${targetColId}"]`);
+            const domCount = colEl?.querySelectorAll('[data-task-id]').length ?? 0;
+            const draggedInDom = domCount >= sortedVisible.length;
+
+            console.log('[reorder]', { currentIdx, targetPosition, domCount, storeCount: sortedVisible.length, draggedInDom });
+
+            // If the dragged element is in the DOM, positions after it are inflated by 1
+            if (draggedInDom && currentIdx >= 0 && targetPosition > currentIdx) {
+              targetPosition--;
+            }
+
+            // No-op: task would stay in the same position
+            if (targetPosition === currentIdx) {
+              console.log('[reorder] no-op, skipping');
+              return;
+            }
+
+            console.log('[reorder] final targetPosition:', targetPosition);
+          }
+
+          doMoveTask(taskId, columnId, targetColId, targetPosition);
         }
       };
 
