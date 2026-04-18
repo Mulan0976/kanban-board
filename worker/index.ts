@@ -72,7 +72,8 @@ app.use('/api/*', async (c, next) => {
   const token = getCookie(c, 'auth_token');
   if (token) {
     try {
-      const secret = new TextEncoder().encode(c.env.JWT_SECRET || 'nexus-board-secret-dev');
+      if (!c.env.JWT_SECRET) throw new Error('JWT_SECRET not configured');
+      const secret = new TextEncoder().encode(c.env.JWT_SECRET);
       const { payload } = await jwtVerify(token, secret);
       const p = payload as unknown as JwtPayload;
       const user = await c.env.DB.prepare('SELECT id, email, display_name FROM users WHERE id = ?')
@@ -96,7 +97,8 @@ app.use('/api/*', async (c, next) => {
 // ---------------------------------------------------------------------------
 
 function getJwtSecret(env: Bindings): Uint8Array {
-  return new TextEncoder().encode(env.JWT_SECRET || 'nexus-board-secret-dev');
+  if (!env.JWT_SECRET) throw new Error('JWT_SECRET not configured');
+  return new TextEncoder().encode(env.JWT_SECRET);
 }
 
 async function getBoardPermission(

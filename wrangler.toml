@@ -25,5 +25,5 @@ class_name = "BoardRoom"
 tag = "v1"
 new_sqlite_classes = ["BoardRoom"]
 
-[vars]
-JWT_SECRET = "nexus-board-secret-dev"
+# JWT_SECRET is configured as a Cloudflare Workers secret.
+# Set it with: npx wrangler secret put JWT_SECRET
