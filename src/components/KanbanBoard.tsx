@@ -277,7 +277,7 @@ function AssigneeSection({ task, board, canEdit }: { task: Task; board: Board; c
     if (exists) {
       newAssignees = assignees.filter((a) => a.name !== member.displayName);
     } else {
-      newAssignees = [...assignees, { id: member.id, name: member.displayName }];
+      newAssignees = [...assignees, { id: crypto.randomUUID(), name: member.displayName }];
     }
     setAssignees(newAssignees);
     updateTask(task.id, { assignees: newAssignees });
@@ -383,6 +383,10 @@ function TaskModal({ task, columnId, board, onClose, permission }: TaskModalProp
   const [timeLogMinutes, setTimeLogMinutes] = useState('');
   const [newCheckpoint, setNewCheckpoint] = useState('');
   const [checkpoints, setCheckpoints] = useState(task.checkpoints);
+  const [editingCpId, setEditingCpId] = useState<string | null>(null);
+  const [editingCpTitle, setEditingCpTitle] = useState('');
+  const [draggingCpId, setDraggingCpId] = useState<string | null>(null);
+  const [cpDropIdx, setCpDropIdx] = useState<number | null>(null);
   const [newDepId, setNewDepId] = useState('');
   const [attachments, setAttachments] = useState<string[]>(task.attachments || []);
   const [previewImage, setPreviewImage] = useState<string | null>(task.previewImage);
@@ -540,6 +544,46 @@ function TaskModal({ task, columnId, board, onClose, permission }: TaskModalProp
     } catch {
       // handle silently
     }
+  };
+
+  const saveCheckpointTitle = async (cpId: string) => {
+    const trimmed = editingCpTitle.trim();
+    setEditingCpId(null);
+    if (!canEdit || !trimmed) return;
+    const current = checkpoints.find((c) => c.id === cpId);
+    if (!current || current.title === trimmed) return;
+    const newCps = checkpoints.map((c) => (c.id === cpId ? { ...c, title: trimmed } : c));
+    setCheckpoints(newCps);
+    updateTask(task.id, { checkpoints: newCps });
+    try {
+      await api.tasks.updateCheckpoint(cpId, { title: trimmed });
+    } catch {
+      // handle silently
+    }
+  };
+
+  const reorderCheckpoints = async (newCps: typeof checkpoints) => {
+    const reindexed = newCps.map((c, i) => ({ ...c, position: i }));
+    setCheckpoints(reindexed);
+    updateTask(task.id, { checkpoints: reindexed });
+    try {
+      await api.tasks.update(task.id, { checkpoints: reindexed });
+    } catch {
+      // handle silently
+    }
+  };
+
+  const handleCheckpointDrop = async (targetIdx: number) => {
+    if (!canEdit || !draggingCpId) return;
+    const fromIdx = checkpoints.findIndex((c) => c.id === draggingCpId);
+    setDraggingCpId(null);
+    setCpDropIdx(null);
+    if (fromIdx === -1) return;
+    const next = [...checkpoints];
+    const [moved] = next.splice(fromIdx, 1);
+    const insertIdx = targetIdx > fromIdx ? targetIdx - 1 : targetIdx;
+    next.splice(Math.min(insertIdx, next.length), 0, moved);
+    await reorderCheckpoints(next);
   };
 
   const addDependency = async () => {
@@ -773,43 +817,115 @@ function TaskModal({ task, columnId, board, onClose, permission }: TaskModalProp
             <label className="text-xs text-[#6b7280] mb-2 block flex items-center gap-1">
               <CheckSquare size={12} /> Checkpoints ({checkpoints.filter((c) => c.isCompleted).length}/{checkpoints.length})
             </label>
-            <div className="space-y-1 mb-2">
-              {checkpoints.map((cp) => (
-                <div
-                  key={cp.id}
-                  className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-1.5"
-                >
-                  <button
-                    onClick={() => toggleCheckpoint(cp.id)}
-                    disabled={!canEdit}
-                    className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-                      cp.isCompleted
-                        ? 'bg-emerald-500 border-emerald-500'
-                        : 'border-white/20 hover:border-emerald-500/50'
-                    }`}
-                  >
-                    {cp.isCompleted && (
-                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                        <path d="M2 5L4 7L8 3" stroke="white" strokeWidth="1.5" />
-                      </svg>
-                    )}
-                  </button>
-                  <span
-                    className={`flex-1 text-sm ${
-                      cp.isCompleted ? 'text-[#6b7280] line-through' : 'text-[#f3f4f6]'
-                    }`}
-                  >
-                    {cp.title}
-                  </span>
-                  {canEdit && (
-                    <button
-                      onClick={() => deleteCheckpoint(cp.id)}
-                      className="p-1 rounded hover:bg-red-500/20 text-[#6b7280] hover:text-red-400 transition-colors"
-                    >
-                      <X size={12} />
-                    </button>
+            <div
+              className="space-y-1 mb-2"
+              onDragOver={(e) => {
+                if (draggingCpId) e.preventDefault();
+              }}
+              onDrop={(e) => {
+                if (!draggingCpId) return;
+                e.preventDefault();
+                handleCheckpointDrop(checkpoints.length);
+              }}
+            >
+              {checkpoints.map((cp, idx) => (
+                <React.Fragment key={cp.id}>
+                  {draggingCpId && cpDropIdx === idx && draggingCpId !== cp.id && (
+                    <div className="h-0.5 rounded-full bg-emerald-400 mx-2 shadow-[0_0_6px_rgba(52,211,153,0.6)]" />
                   )}
-                </div>
+                  <div
+                    draggable={canEdit && editingCpId !== cp.id}
+                    onDragStart={(e) => {
+                      if (!canEdit || editingCpId === cp.id) {
+                        e.preventDefault();
+                        return;
+                      }
+                      setDraggingCpId(cp.id);
+                      e.dataTransfer.effectAllowed = 'move';
+                      try { e.dataTransfer.setData('text/plain', cp.id); } catch {}
+                    }}
+                    onDragEnd={() => {
+                      setDraggingCpId(null);
+                      setCpDropIdx(null);
+                    }}
+                    onDragOver={(e) => {
+                      if (!draggingCpId) return;
+                      e.preventDefault();
+                      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                      const isAbove = e.clientY < rect.top + rect.height / 2;
+                      setCpDropIdx(isAbove ? idx : idx + 1);
+                    }}
+                    onDrop={(e) => {
+                      if (!draggingCpId) return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+                      const isAbove = e.clientY < rect.top + rect.height / 2;
+                      handleCheckpointDrop(isAbove ? idx : idx + 1);
+                    }}
+                    className={`group flex items-center gap-2 bg-white/5 rounded-lg px-3 py-1.5 transition-opacity ${
+                      draggingCpId === cp.id ? 'opacity-40' : ''
+                    }`}
+                  >
+                    {canEdit && (
+                      <span
+                        className="text-[#6b7280] cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Drag to reorder"
+                      >
+                        <GripVertical size={12} />
+                      </span>
+                    )}
+                    <button
+                      onClick={() => toggleCheckpoint(cp.id)}
+                      disabled={!canEdit}
+                      className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                        cp.isCompleted
+                          ? 'bg-emerald-500 border-emerald-500'
+                          : 'border-white/20 hover:border-emerald-500/50'
+                      }`}
+                    >
+                      {cp.isCompleted && (
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                          <path d="M2 5L4 7L8 3" stroke="white" strokeWidth="1.5" />
+                        </svg>
+                      )}
+                    </button>
+                    {editingCpId === cp.id ? (
+                      <input
+                        autoFocus
+                        value={editingCpTitle}
+                        onChange={(e) => setEditingCpTitle(e.target.value)}
+                        onBlur={() => saveCheckpointTitle(cp.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveCheckpointTitle(cp.id);
+                          if (e.key === 'Escape') setEditingCpId(null);
+                        }}
+                        className="flex-1 bg-white/[0.04] border border-emerald-500/30 rounded px-2 py-0.5 text-sm text-[#f3f4f6] outline-none"
+                      />
+                    ) : (
+                      <span
+                        className={`flex-1 text-sm ${
+                          cp.isCompleted ? 'text-[#6b7280] line-through' : 'text-[#f3f4f6]'
+                        } ${canEdit ? 'cursor-text' : ''}`}
+                        onClick={() => {
+                          if (!canEdit) return;
+                          setEditingCpId(cp.id);
+                          setEditingCpTitle(cp.title);
+                        }}
+                      >
+                        {cp.title}
+                      </span>
+                    )}
+                    {canEdit && (
+                      <button
+                        onClick={() => deleteCheckpoint(cp.id)}
+                        className="p-1 rounded hover:bg-red-500/20 text-[#6b7280] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                </React.Fragment>
               ))}
             </div>
             {canEdit && (
@@ -1256,16 +1372,17 @@ function KanbanBoard() {
         handleDeleteSelected();
       }
 
-      // Ctrl+Z Undo
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+      // Ctrl+Z Undo (let native undo run inside text inputs)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey && !isInput) {
         e.preventDefault();
         handleUndo();
       }
 
-      // Ctrl+Shift+Z or Ctrl+Y Redo
+      // Ctrl+Shift+Z or Ctrl+Y Redo (let native redo run inside text inputs)
       if (
-        ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Z') ||
-        ((e.ctrlKey || e.metaKey) && e.key === 'y')
+        !isInput &&
+        (((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Z') ||
+          ((e.ctrlKey || e.metaKey) && e.key === 'y'))
       ) {
         e.preventDefault();
         handleRedo();

@@ -67,6 +67,19 @@ export const api = {
         body: JSON.stringify(data),
       }),
     delete: (id: string) => request(`/boards/${id}`, { method: 'DELETE' }),
+    uploadPreview: async (id: string, file: File): Promise<{ url: string }> => {
+      const fd = new FormData();
+      fd.append('image', file);
+      const res = await fetch(`${API}/boards/${id}/preview-image`, {
+        method: 'POST',
+        credentials: 'include',
+        body: fd,
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    removePreview: (id: string) =>
+      request(`/boards/${id}/preview-image`, { method: 'DELETE' }),
     invite: (id: string, permission: 'view' | 'edit') =>
       request<{ code: string; permission: string }>(`/boards/${id}/invite`, {
         method: 'POST',

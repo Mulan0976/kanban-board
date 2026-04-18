@@ -382,7 +382,7 @@ app.get('/api/boards', async (c) => {
 
   if (userId) {
     const { results: ownedByUser } = await db.prepare(`
-      SELECT b.id, b.title, b.updated_at,
+      SELECT b.id, b.title, b.updated_at, b.preview_image,
              COALESCE(u.display_name, 'Anonymous') as owner_name,
              'owner' as permission
       FROM boards b LEFT JOIN users u ON b.owner_id = u.id
@@ -391,7 +391,7 @@ app.get('/api/boards', async (c) => {
     boards.push(...ownedByUser);
 
     const { results: memberOfUser } = await db.prepare(`
-      SELECT b.id, b.title, b.updated_at,
+      SELECT b.id, b.title, b.updated_at, b.preview_image,
              COALESCE(u.display_name, 'Anonymous') as owner_name,
              bm.permission
       FROM boards b JOIN board_members bm ON bm.board_id = b.id
@@ -402,7 +402,7 @@ app.get('/api/boards', async (c) => {
   }
 
   const { results: ownedBySession } = await db.prepare(`
-    SELECT b.id, b.title, b.updated_at, 'Anonymous' as owner_name, 'owner' as permission
+    SELECT b.id, b.title, b.updated_at, b.preview_image, 'Anonymous' as owner_name, 'owner' as permission
     FROM boards b WHERE b.owner_session = ?
   `).bind(sessionToken).all();
   boards.push(...ownedBySession);
@@ -426,10 +426,49 @@ app.get('/api/boards', async (c) => {
     }
   }
 
-  const result = Array.from(boardMap.values()).map((b: any) => ({
-    id: b.id, title: b.title, ownerName: b.owner_name,
-    permission: b.permission, updatedAt: b.updated_at,
-  }));
+  const boardList = Array.from(boardMap.values());
+
+  // Fetch open-task counts (not in a done column, not completed) and
+  // count of those assigned to the current user by display name.
+  const displayName = c.get('user')?.displayName || null;
+
+  const counts = await Promise.all(
+    boardList.map(async (b: any) => {
+      const openRow = await db.prepare(`
+        SELECT COUNT(*) as n
+        FROM tasks t
+        JOIN columns c ON c.id = t.column_id
+        WHERE c.board_id = ? AND c.is_done_column = 0 AND t.completed_at IS NULL
+      `).bind(b.id).first<{ n: number }>();
+
+      let mine = 0;
+      if (displayName) {
+        const mineRow = await db.prepare(`
+          SELECT COUNT(DISTINCT t.id) as n
+          FROM tasks t
+          JOIN columns c ON c.id = t.column_id
+          JOIN task_assignees a ON a.task_id = t.id
+          WHERE c.board_id = ? AND c.is_done_column = 0 AND t.completed_at IS NULL
+            AND LOWER(a.name) = LOWER(?)
+        `).bind(b.id, displayName).first<{ n: number }>();
+        mine = mineRow?.n ?? 0;
+      }
+
+      return { id: b.id, openTaskCount: openRow?.n ?? 0, userOpenTaskCount: mine };
+    })
+  );
+  const countById = new Map(counts.map((x) => [x.id, x]));
+
+  const result = boardList.map((b: any) => {
+    const ct = countById.get(b.id);
+    return {
+      id: b.id, title: b.title, ownerName: b.owner_name,
+      permission: b.permission, updatedAt: b.updated_at,
+      previewImage: b.preview_image ?? null,
+      openTaskCount: ct?.openTaskCount ?? 0,
+      userOpenTaskCount: ct?.userOpenTaskCount ?? 0,
+    };
+  });
 
   return c.json(result);
 });
@@ -512,6 +551,7 @@ app.get('/api/boards/:id', async (c) => {
   return c.json({
     id: board.id, title: board.title, ownerId: board.owner_id,
     ownerName, permission, columns: columnsWithTasks,
+    previewImage: board.preview_image ?? null,
     createdAt: board.created_at, updatedAt: board.updated_at,
   });
 });
@@ -542,6 +582,55 @@ app.delete('/api/boards/:id', async (c) => {
   if (err) return c.json({ error: err }, 403);
 
   await c.env.DB.prepare('DELETE FROM boards WHERE id = ?').bind(boardId).run();
+  return c.json({ success: true });
+});
+
+app.post('/api/boards/:id/preview-image', async (c) => {
+  const boardId = c.req.param('id');
+  const user = c.get('user');
+  const sessionToken = c.get('sessionToken');
+
+  const permErr = await requirePerm(c.env.DB, boardId, user?.id, sessionToken, 'owner');
+  if (permErr) return c.json({ error: permErr }, 403);
+
+  const formData = await c.req.formData();
+  const file = formData.get('image') as File | null;
+  if (!file) return c.json({ error: 'No image file provided' }, 400);
+  if (!file.type.startsWith('image/')) return c.json({ error: 'Only images allowed' }, 400);
+  if (file.size > 10 * 1024 * 1024) return c.json({ error: 'File too large (max 10MB)' }, 400);
+
+  const ext = file.name.includes('.') ? '.' + file.name.split('.').pop() : '';
+  const key = `${crypto.randomUUID()}${ext}`;
+  await c.env.IMAGES.put(key, file.stream(), {
+    httpMetadata: { contentType: file.type },
+  });
+
+  const url = `/uploads/${key}`;
+  await c.env.DB.prepare("UPDATE boards SET preview_image = ?, updated_at = datetime('now') WHERE id = ?")
+    .bind(url, boardId).run();
+
+  return c.json({ url });
+});
+
+app.delete('/api/boards/:id/preview-image', async (c) => {
+  const boardId = c.req.param('id');
+  const user = c.get('user');
+  const sessionToken = c.get('sessionToken');
+
+  const permErr = await requirePerm(c.env.DB, boardId, user?.id, sessionToken, 'owner');
+  if (permErr) return c.json({ error: permErr }, 403);
+
+  const existing = await c.env.DB.prepare('SELECT preview_image FROM boards WHERE id = ?').bind(boardId).first<{ preview_image: string | null }>();
+  if (existing?.preview_image) {
+    const key = existing.preview_image.split('/').pop();
+    if (key) {
+      try { await c.env.IMAGES.delete(key); } catch {}
+    }
+  }
+
+  await c.env.DB.prepare("UPDATE boards SET preview_image = NULL, updated_at = datetime('now') WHERE id = ?")
+    .bind(boardId).run();
+
   return c.json({ success: true });
 });
 
@@ -903,12 +992,15 @@ app.put('/api/tasks/:id', async (c) => {
     newPreviewImage, newPreviewSettings, newPosition, newColumnId, newCompletedAt, newAttachments, taskId
   ).run();
 
-  // Handle assignees full replace
+  // Handle assignees full replace.
+  // Always generate fresh UUIDs for inserted rows since the row id has no
+  // semantic meaning outside this task and client-supplied ids can collide
+  // with stale rows from older buggy client versions.
   if (body.assignees !== undefined && Array.isArray(body.assignees)) {
     const deleteStmt = db.prepare('DELETE FROM task_assignees WHERE task_id = ?').bind(taskId);
     const insertStmts = body.assignees.map((a: any) =>
       db.prepare('INSERT INTO task_assignees (id, task_id, name) VALUES (?, ?, ?)')
-        .bind(a.id || crypto.randomUUID(), taskId, a.name)
+        .bind(crypto.randomUUID(), taskId, a.name)
     );
     await db.batch([deleteStmt, ...insertStmts]);
   }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus,
@@ -12,11 +12,13 @@ import {
   Link2,
   User,
   ArrowRight,
-  LayoutGrid,
   AlertCircle,
+  ImagePlus,
+  ImageOff,
 } from 'lucide-react';
 import { Button, Badge, Input } from './UI';
 import AuthModal from './AuthModal';
+import BetterBoardIcon from './BetterBoardIcon';
 import { useStore } from '../store';
 import { api } from '../api';
 import type { BoardSummary, User as UserType } from '../types';
@@ -50,6 +52,9 @@ export default function BoardList() {
   const [joinError, setJoinError] = useState('');
   const [deletingBoardId, setDeletingBoardId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [uploadingPreviewId, setUploadingPreviewId] = useState<string | null>(null);
+  const previewFileInputRef = useRef<HTMLInputElement>(null);
+  const [previewUploadBoardId, setPreviewUploadBoardId] = useState<string | null>(null);
   const [showMigrationPrompt, setShowMigrationPrompt] = useState(false);
   const [migrating, setMigrating] = useState(false);
 
@@ -147,6 +152,45 @@ export default function BoardList() {
     [boards, setBoards]
   );
 
+  // Preview image upload
+  const handleChoosePreview = useCallback((boardId: string) => {
+    setPreviewUploadBoardId(boardId);
+    previewFileInputRef.current?.click();
+  }, []);
+
+  const handlePreviewFileSelected = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = '';
+      const boardId = previewUploadBoardId;
+      setPreviewUploadBoardId(null);
+      if (!file || !boardId) return;
+
+      setUploadingPreviewId(boardId);
+      try {
+        const { url } = await api.boards.uploadPreview(boardId, file);
+        setBoards(boards.map((b) => (b.id === boardId ? { ...b, previewImage: url } : b)));
+      } catch (err: any) {
+        console.error('Failed to upload preview:', err);
+      } finally {
+        setUploadingPreviewId(null);
+      }
+    },
+    [previewUploadBoardId, boards, setBoards]
+  );
+
+  const handleRemovePreview = useCallback(
+    async (boardId: string) => {
+      try {
+        await api.boards.removePreview(boardId);
+        setBoards(boards.map((b) => (b.id === boardId ? { ...b, previewImage: null } : b)));
+      } catch (err: any) {
+        console.error('Failed to remove preview:', err);
+      }
+    },
+    [boards, setBoards]
+  );
+
   // Merge anonymous boards
   const handleMerge = useCallback(async () => {
     const anonBoards = getCookie('anonymous_boards');
@@ -201,8 +245,8 @@ export default function BoardList() {
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-5 flex items-center justify-between">
           {/* Logo / Title */}
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-emerald-600/20 border border-emerald-500/20 flex items-center justify-center shadow-[0_0_20px_rgba(34,197,94,0.15)]">
-              <LayoutGrid size={18} className="text-emerald-400" />
+            <div className="w-9 h-9 rounded-lg bg-emerald-600/15 border border-emerald-500/25 flex items-center justify-center shadow-[0_0_22px_rgba(34,197,94,0.25)]">
+              <BetterBoardIcon size={22} animate />
             </div>
             <h1
               className="text-xl font-bold text-gray-100 tracking-tight"
@@ -261,6 +305,15 @@ export default function BoardList() {
           </div>
         </div>
       </header>
+
+      {/* Hidden preview-image file input (owner-only upload) */}
+      <input
+        ref={previewFileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handlePreviewFileSelected}
+        className="hidden"
+      />
 
       {/* ======== Main Content ======== */}
       <main className="relative z-10 max-w-5xl mx-auto px-4 sm:px-6 py-8">
@@ -436,11 +489,25 @@ export default function BoardList() {
             {boards.map((board) => (
               <div
                 key={board.id}
-                className="group glass rounded-xl p-5 border border-[rgba(255,255,255,0.08)] hover:border-emerald-500/20 cursor-pointer transition-all duration-300 hover:shadow-[0_0_30px_rgba(34,197,94,0.06)] relative"
+                className="group glass rounded-xl p-5 border border-[rgba(255,255,255,0.08)] hover:border-emerald-500/20 cursor-pointer transition-all duration-300 hover:shadow-[0_0_30px_rgba(34,197,94,0.06)] relative overflow-hidden min-h-[200px] flex flex-col"
                 onClick={() => navigate(`/board/${board.id}`)}
               >
+                {/* Preview image background */}
+                {board.previewImage && (
+                  <div className="absolute inset-0 z-0 pointer-events-none">
+                    <img
+                      src={board.previewImage}
+                      alt=""
+                      className="w-full h-full object-cover opacity-30 group-hover:opacity-45 transition-opacity"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/85 to-[#050505]/30" />
+                  </div>
+                )}
+
+                {/* Content wrapper sits above preview */}
+                <div className="relative z-10 flex flex-col flex-1">
                 {/* Permission badge */}
-                <div className="absolute top-3 right-3">
+                <div className="absolute top-0 right-0">
                   {permissionBadge(board.permission)}
                 </div>
 
@@ -460,6 +527,24 @@ export default function BoardList() {
                 {/* Owner */}
                 <p className="text-xs text-gray-600 mb-3">by {board.ownerName}</p>
 
+                {/* Task counts */}
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                  <span
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-white/[0.04] border border-[rgba(255,255,255,0.08)] text-gray-400 font-mono"
+                    title="Open tasks on this board"
+                  >
+                    {board.openTaskCount} open
+                  </span>
+                  {board.userOpenTaskCount > 0 && (
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-amber-500/15 border border-amber-400/30 text-amber-300 font-mono"
+                      title="Open tasks assigned to you"
+                    >
+                      {board.userOpenTaskCount} for you
+                    </span>
+                  )}
+                </div>
+
                 {/* Footer */}
                 <div className="flex items-center justify-between mt-auto pt-3 border-t border-[rgba(255,255,255,0.04)]">
                   <span className="text-[10px] text-gray-700">
@@ -470,11 +555,11 @@ export default function BoardList() {
                     })}
                   </span>
 
-                  {/* Delete button (owner only) */}
+                  {/* Owner actions (preview + delete) */}
                   {board.permission === 'owner' && (
                     <div
                       onClick={(e) => e.stopPropagation()}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       {deleteConfirmId === board.id ? (
                         <div className="flex items-center gap-1.5">
@@ -493,15 +578,40 @@ export default function BoardList() {
                           </button>
                         </div>
                       ) : (
-                        <button
-                          onClick={() => setDeleteConfirmId(board.id)}
-                          className="p-1 text-gray-700 hover:text-red-400 transition-colors rounded hover:bg-red-500/10"
-                        >
-                          <Trash2 size={12} />
-                        </button>
+                        <>
+                          <button
+                            onClick={() => handleChoosePreview(board.id)}
+                            disabled={uploadingPreviewId === board.id}
+                            title={board.previewImage ? 'Change preview image' : 'Add preview image'}
+                            className="p-1 text-gray-700 hover:text-emerald-400 transition-colors rounded hover:bg-emerald-500/10 disabled:opacity-50"
+                          >
+                            {uploadingPreviewId === board.id ? (
+                              <div className="w-3 h-3 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+                            ) : (
+                              <ImagePlus size={12} />
+                            )}
+                          </button>
+                          {board.previewImage && (
+                            <button
+                              onClick={() => handleRemovePreview(board.id)}
+                              title="Remove preview image"
+                              className="p-1 text-gray-700 hover:text-amber-400 transition-colors rounded hover:bg-amber-500/10"
+                            >
+                              <ImageOff size={12} />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setDeleteConfirmId(board.id)}
+                            title="Delete board"
+                            className="p-1 text-gray-700 hover:text-red-400 transition-colors rounded hover:bg-red-500/10"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </>
                       )}
                     </div>
                   )}
+                </div>
                 </div>
               </div>
             ))}

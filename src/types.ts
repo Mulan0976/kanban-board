@@ -13,6 +13,7 @@ export interface Board {
   updatedAt: string;
   columns: Column[];
   permission: 'owner' | 'edit' | 'view';
+  previewImage: string | null;
 }
 
 export interface BoardSummary {
@@ -21,6 +22,9 @@ export interface BoardSummary {
   ownerName: string;
   permission: 'owner' | 'edit' | 'view';
   updatedAt: string;
+  openTaskCount: number;
+  userOpenTaskCount: number;
+  previewImage: string | null;
 }
 
 export interface Column {

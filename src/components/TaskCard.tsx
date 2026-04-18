@@ -57,6 +57,11 @@ function TaskCard({
   const isLinkTarget =
     linkingFromTaskId !== null && linkingFromTaskId !== task.id;
   const isLinkSource = linkingFromTaskId === task.id;
+  const isAssignedToMe = useMemo(() => {
+    const myName = user?.displayName?.toLowerCase();
+    if (!myName) return false;
+    return task.assignees.some((a) => a.name.toLowerCase() === myName);
+  }, [task.assignees, user?.displayName]);
 
   // ============================================================
   // Progress
@@ -206,15 +211,19 @@ function TaskCard({
           : ''
       } ${isLinkTarget ? 'ring-2 ring-blue-500/50 cursor-crosshair' : ''} ${
         isLinkSource ? 'ring-2 ring-emerald-500/80 shadow-[0_0_25px_rgba(34,197,94,0.2)]' : ''
-      }`}
+      } ${isAssignedToMe && !isSelected && !isLinkTarget && !isLinkSource ? 'ring-1 ring-amber-400/40 shadow-[0_0_18px_rgba(251,191,36,0.12)]' : ''}`}
       style={{
         background: task.previewImage
           ? 'rgba(20, 20, 20, 0.8)'
+          : isAssignedToMe
+          ? 'rgba(40, 30, 10, 0.6)'
           : 'rgba(20, 20, 20, 0.6)',
         border: isSelected
           ? '1px solid rgba(34, 197, 94, 0.3)'
           : isLinkTarget
           ? '1px solid rgba(59, 130, 246, 0.3)'
+          : isAssignedToMe
+          ? '1px solid rgba(251, 191, 36, 0.25)'
           : '1px solid rgba(255, 255, 255, 0.06)',
       }}
       data-task-id={task.id}
@@ -372,15 +381,24 @@ function TaskCard({
           {/* Assignees */}
           {task.assignees.length > 0 && (
             <div className="flex items-center gap-1">
-              {task.assignees.slice(0, 3).map((assignee) => (
-                <div
-                  key={assignee.id}
-                  className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center text-[8px] text-emerald-400 font-medium border border-emerald-500/20"
-                  title={assignee.name}
-                >
-                  {assignee.name.charAt(0).toUpperCase()}
-                </div>
-              ))}
+              {task.assignees.slice(0, 3).map((assignee) => {
+                const isMe =
+                  user?.displayName &&
+                  assignee.name.toLowerCase() === user.displayName.toLowerCase();
+                return (
+                  <div
+                    key={assignee.id}
+                    className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-medium border ${
+                      isMe
+                        ? 'bg-amber-500/30 text-amber-300 border-amber-400/50'
+                        : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/20'
+                    }`}
+                    title={isMe ? `${assignee.name} (you)` : assignee.name}
+                  >
+                    {assignee.name.charAt(0).toUpperCase()}
+                  </div>
+                );
+              })}
               {task.assignees.length > 3 && (
                 <span className="text-[10px] text-[#6b7280]">
                   +{task.assignees.length - 3}
