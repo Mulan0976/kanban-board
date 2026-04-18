@@ -341,7 +341,7 @@ function TaskCard({
                       </svg>
                     )}
                   </div>
-                  <span className={`text-xs leading-snug truncate ${
+                  <span className={`flex-1 min-w-0 text-xs leading-snug break-words text-left ${
                     cp.isCompleted ? 'text-[#6b7280] line-through' : 'text-[#e5e7eb]'
                   }`}>
                     {cp.title}

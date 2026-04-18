@@ -878,7 +878,7 @@ function TaskModal({ task, columnId, board, onClose, permission }: TaskModalProp
                     <button
                       onClick={() => toggleCheckpoint(cp.id)}
                       disabled={!canEdit}
-                      className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                      className={`w-4 h-4 flex-shrink-0 rounded border flex items-center justify-center transition-colors ${
                         cp.isCompleted
                           ? 'bg-emerald-500 border-emerald-500'
                           : 'border-white/20 hover:border-emerald-500/50'
@@ -904,7 +904,7 @@ function TaskModal({ task, columnId, board, onClose, permission }: TaskModalProp
                       />
                     ) : (
                       <span
-                        className={`flex-1 text-sm ${
+                        className={`flex-1 min-w-0 text-sm break-words ${
                           cp.isCompleted ? 'text-[#6b7280] line-through' : 'text-[#f3f4f6]'
                         } ${canEdit ? 'cursor-text' : ''}`}
                         onClick={() => {
@@ -919,7 +919,7 @@ function TaskModal({ task, columnId, board, onClose, permission }: TaskModalProp
                     {canEdit && (
                       <button
                         onClick={() => deleteCheckpoint(cp.id)}
-                        className="p-1 rounded hover:bg-red-500/20 text-[#6b7280] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                        className="p-1 flex-shrink-0 rounded hover:bg-red-500/20 text-[#6b7280] hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
                       >
                         <X size={12} />
                       </button>
