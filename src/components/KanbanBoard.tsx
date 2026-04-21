@@ -387,6 +387,7 @@ function TaskModal({ task, columnId, board, onClose, permission }: TaskModalProp
   const [editingCpTitle, setEditingCpTitle] = useState('');
   const [draggingCpId, setDraggingCpId] = useState<string | null>(null);
   const [cpDropIdx, setCpDropIdx] = useState<number | null>(null);
+  const [cpCopied, setCpCopied] = useState(false);
   const [newDepId, setNewDepId] = useState('');
   const [attachments, setAttachments] = useState<string[]>(task.attachments || []);
   const [previewImage, setPreviewImage] = useState<string | null>(task.previewImage);
@@ -570,6 +571,57 @@ function TaskModal({ task, columnId, board, onClose, permission }: TaskModalProp
       await api.tasks.update(task.id, { checkpoints: reindexed });
     } catch {
       // handle silently
+    }
+  };
+
+  const copyCheckpoints = async () => {
+    if (checkpoints.length === 0) return;
+    // Unicode combining long stroke overlay for strikethrough in plain text
+    const strike = (s: string) => Array.from(s).map((c) => c + '\u0336').join('');
+    const escapeHtml = (s: string) =>
+      s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    const plainLines = checkpoints.map((cp) =>
+      cp.isCompleted ? strike(cp.title) : cp.title
+    );
+    // Fallback line has "(completed)" marker so plain-text consumers that
+    // strip combining marks still get the status.
+    const plainFallback = checkpoints
+      .map((cp) => (cp.isCompleted ? `${cp.title} (completed)` : cp.title))
+      .join('\n');
+    const plain = plainLines.join('\n');
+
+    const htmlItems = checkpoints
+      .map((cp) => {
+        const body = escapeHtml(cp.title);
+        return cp.isCompleted
+          ? `<li style="text-decoration: line-through; opacity: 0.7">${body}</li>`
+          : `<li>${body}</li>`;
+      })
+      .join('');
+    const html = `<ul>${htmlItems}</ul>`;
+
+    try {
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            'text/html': new Blob([html], { type: 'text/html' }),
+            'text/plain': new Blob([plain], { type: 'text/plain' }),
+          }),
+        ]);
+      } else {
+        await navigator.clipboard.writeText(plainFallback);
+      }
+      setCpCopied(true);
+      setTimeout(() => setCpCopied(false), 1500);
+    } catch {
+      try {
+        await navigator.clipboard.writeText(plainFallback);
+        setCpCopied(true);
+        setTimeout(() => setCpCopied(false), 1500);
+      } catch {
+        // clipboard unavailable
+      }
     }
   };
 
@@ -814,9 +866,25 @@ function TaskModal({ task, columnId, board, onClose, permission }: TaskModalProp
 
           {/* Checkpoints */}
           <div>
-            <label className="text-xs text-[#6b7280] mb-2 block flex items-center gap-1">
-              <CheckSquare size={12} /> Checkpoints ({checkpoints.filter((c) => c.isCompleted).length}/{checkpoints.length})
-            </label>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <label className="text-xs text-[#6b7280] flex items-center gap-1">
+                <CheckSquare size={12} /> Checkpoints ({checkpoints.filter((c) => c.isCompleted).length}/{checkpoints.length})
+              </label>
+              {checkpoints.length > 0 && (
+                <button
+                  onClick={copyCheckpoints}
+                  className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded transition-colors ${
+                    cpCopied
+                      ? 'bg-emerald-500/20 text-emerald-300'
+                      : 'text-[#6b7280] hover:text-emerald-400 hover:bg-white/[0.04]'
+                  }`}
+                  title="Copy checkpoints to clipboard"
+                >
+                  <Copy size={11} />
+                  {cpCopied ? 'Copied!' : 'Copy'}
+                </button>
+              )}
+            </div>
             <div
               className="space-y-1 mb-2"
               onDragOver={(e) => {
